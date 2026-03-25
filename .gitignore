@@ -1,0 +1,14 @@
+# Ignoruj ustawienia połączenia z Malinką
+.vscode/sftp.json
+
+# Ignoruj zdjęcia i wideo z testów kamery
+*.jpg
+*.jpeg
+*.png
+*.h264
+*.mp4
+
+# Ignoruj pliki tymczasowe i wirtualne środowiska Pythona (przydadzą się później)
+__pycache__/
+.venv/
+venv/
