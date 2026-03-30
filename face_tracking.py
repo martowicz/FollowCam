@@ -1,186 +1,109 @@
-import importlib
-from pathlib import Path
-from typing import Generator
-
 import cv2
-
-
-def _is_raspberry_pi() -> bool:
-    model_path = Path("/proc/device-tree/model")
-    if not model_path.exists():
-        return False
-
-    try:
-        model_text = model_path.read_text(encoding="utf-8", errors="ignore").lower()
-    except OSError:
-        return False
-
-    return "raspberry pi" in model_text
-
-
-class OpenCVCamera:
-    def __init__(self, camera_index: int) -> None:
-        self.capture = cv2.VideoCapture(camera_index)
-        if not self.capture.isOpened():
-            raise RuntimeError(
-                "Could not open camera via OpenCV. On macOS, grant camera permissions to your terminal/IDE."
-            )
-
-    def read(self) -> tuple[bool, object]:
-        return self.capture.read()
-
-    def release(self) -> None:
-        self.capture.release()
-
-
-class PiCamera2Camera:
-    def __init__(self, frame_width: int, frame_height: int) -> None:
-        try:
-            picamera2_module = importlib.import_module("picamera2")
-            picamera2_class = getattr(picamera2_module, "Picamera2")
-        except ImportError as exc:
-            raise RuntimeError(
-                "Picamera2 backend requires picamera2. Install on Raspberry Pi: sudo apt install -y python3-picamera2"
-            ) from exc
-
-        self.camera = picamera2_class()
-        config = self.camera.create_video_configuration(
-            main={"size": (frame_width, frame_height), "format": "RGB888"}
-        )
-        self.camera.configure(config)
-        self.camera.start()
-
-    def read(self) -> tuple[bool, object]:
-        frame_rgb = self.camera.capture_array()
-        if frame_rgb is None:
-            return False, None
-
-        if len(frame_rgb.shape) == 3 and frame_rgb.shape[2] == 4:
-            frame_bgr = cv2.cvtColor(frame_rgb, cv2.COLOR_RGBA2BGR)
-        else:
-            frame_bgr = cv2.cvtColor(frame_rgb, cv2.COLOR_RGB2BGR)
-
-        return True, frame_bgr
-
-    def release(self) -> None:
-        try:
-            self.camera.stop()
-        finally:
-            close_method = getattr(self.camera, "close", None)
-            if callable(close_method):
-                close_method()
-
+import threading
+import time
+from typing import Generator
+from picamera2 import Picamera2
 
 class FaceTracker:
     def __init__(
-        self,
-        camera_index: int,
-        scale_factor: float,
-        min_neighbors: int,
-        camera_backend: str = "auto",
-        frame_width: int = 640,
-        frame_height: int = 480,
-    ) -> None:
+        self, 
+        camera_index=0, 
+        camera_backend="auto", 
+        frame_width=320, 
+        frame_height=240,
+        source_fps=10,             # <-- O to pytał main.py!
+        scale_factor=1.5, 
+        min_neighbors=6, 
+        detection_scale=0.25,      # <-- O to pytał main.py!
+        frame_skip=12,             # <-- O to pytał main.py!
+        jpeg_quality=35            # <-- O to pytał main.py!
+    ):
+        # 1. Przypisanie argumentów do zmiennych klasy
         self.scale_factor = scale_factor
         self.min_neighbors = min_neighbors
-        self.active_backend = "opencv"
-
-        cascade_path = cv2.data.haarcascades + "haarcascade_frontalface_default.xml"
-        self.face_cascade = cv2.CascadeClassifier(cascade_path)
+        self.detection_scale = detection_scale
+        self.frame_skip = frame_skip
+        self.jpeg_quality = jpeg_quality
+        self.source_fps = source_fps
+        
+        # 2. Inicjalizacja detekcji twarzy
+        self.face_cascade = cv2.CascadeClassifier("haarcascade_frontalface_default.xml")
         if self.face_cascade.empty():
-            raise RuntimeError(f"Could not load Haar cascade from: {cascade_path}")
+            raise RuntimeError("Brak pliku haarcascade_frontalface_default.xml")
 
-        self.camera = self._create_camera(
-            camera_index=camera_index,
-            camera_backend=camera_backend,
-            frame_width=frame_width,
-            frame_height=frame_height,
-        )
+        # 3. Inicjalizacja Picamera2
+        print("--- Inicjalizacja Picamera2 ---")
+        self.picam2 = Picamera2()
+        config = self.picam2.create_video_configuration(main={"size": (frame_width, frame_height), "format": "RGB888"})
+        self.picam2.configure(config)
+        self.picam2.start()
+        print("--- Kamera gotowa ---")
+        
+        # 4. Zmienne dla wielowątkowości
+        self.frame = None
+        self.last_faces = []
+        self.stopped = False
+        self.lock = threading.Lock()
 
-    def _create_camera(
-        self,
-        camera_index: int,
-        camera_backend: str,
-        frame_width: int,
-        frame_height: int,
-    ) -> object:
-        if camera_backend == "opencv":
-            self.active_backend = "opencv"
-            return OpenCVCamera(camera_index)
+        # Uruchomienie wątku tła
+        threading.Thread(target=self._update_thread, daemon=True).start()
 
-        if camera_backend == "picamera2":
-            self.active_backend = "picamera2"
-            return PiCamera2Camera(frame_width, frame_height)
+    def _update_thread(self):
+        frame_count = 0
+        inv_scale = 1.0 / self.detection_scale
+        
+        # Przeliczamy FPS na czas uśpienia (żeby procesor mógł odpocząć)
+        sleep_time = 1.0 / self.source_fps if self.source_fps > 0 else 0.1
 
-        if camera_backend == "auto":
-            if _is_raspberry_pi():
-                try:
-                    camera = PiCamera2Camera(frame_width, frame_height)
-                    self.active_backend = "picamera2"
-                    print("Using camera backend: picamera2")
-                    return camera
-                except Exception as exc:
-                    print(f"Picamera2 backend unavailable ({exc}). Falling back to OpenCV.")
-
-            self.active_backend = "opencv"
-            print("Using camera backend: opencv")
-            return OpenCVCamera(camera_index)
-
-        raise ValueError(
-            "Invalid camera backend. Use one of: auto, opencv, picamera2."
-        )
-
-    def frames(self) -> Generator[bytes, None, None]:
-        while True:
-            ok, frame = self.camera.read()
-            if not ok or frame is None:
+        while not self.stopped:
+            try:
+                # Pobieranie klatki z Picamera2
+                frame_rgb = self.picam2.capture_array()
+                frame = cv2.cvtColor(frame_rgb, cv2.COLOR_RGB2BGR)
+            except Exception as e:
+                print(f"Błąd czytania klatki: {e}")
+                time.sleep(0.1)
                 continue
 
-            gray_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-            faces = self.face_cascade.detectMultiScale(
-                gray_frame,
-                scaleFactor=self.scale_factor,
-                minNeighbors=self.min_neighbors,
-                minSize=(60, 60),
-            )
+            frame_count += 1
 
-            for (x, y, w, h) in faces:
-                cv2.rectangle(frame, (x, y), (x + w, y + h), (0, 255, 0), 2)
-
-                center_x = x + w // 2
-                center_y = y + h // 2
-                cv2.circle(frame, (center_x, center_y), 4, (0, 255, 0), -1)
-
-                text_y = y - 10 if y > 20 else y + h + 20
-                cv2.putText(
-                    frame,
-                    f"Center: ({center_x}, {center_y})",
-                    (x, text_y),
-                    cv2.FONT_HERSHEY_SIMPLEX,
-                    0.6,
-                    (0, 255, 0),
-                    2,
+            # Detekcja tylko co N-tą klatkę
+            if frame_count % self.frame_skip == 0:
+                small = cv2.resize(frame, (0, 0), fx=self.detection_scale, fy=self.detection_scale)
+                gray = cv2.cvtColor(small, cv2.COLOR_BGR2GRAY)
+                
+                faces = self.face_cascade.detectMultiScale(
+                    gray, scaleFactor=self.scale_factor, minNeighbors=self.min_neighbors, minSize=(30, 30)
                 )
 
-            cv2.putText(
-                frame,
-                f"Faces: {len(faces)}",
-                (10, 30),
-                cv2.FONT_HERSHEY_SIMPLEX,
-                0.9,
-                (0, 255, 0),
-                2,
-            )
+                temp_faces = []
+                for (x, y, w, h) in faces:
+                    temp_faces.append((int(x * inv_scale), int(y * inv_scale), int(w * inv_scale), int(h * inv_scale)))
+                
+                with self.lock:
+                    self.last_faces = temp_faces
 
-            ok_encode, buffer = cv2.imencode(".jpg", frame)
-            if not ok_encode:
-                continue
+            # Rysowanie ramek
+            with self.lock:
+                for (x, y, w, h) in self.last_faces:
+                    cv2.rectangle(frame, (x, y), (x + w, y + h), (0, 255, 0), 2)
+                
+                cv2.putText(frame, f"Faces: {len(self.last_faces)}", (10, 25), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 0), 2)
+                self.frame = frame.copy()
+            
+            # Wymuszony odpoczynek procesora na podstawie source_fps z main.py
+            time.sleep(sleep_time)
 
-            frame_bytes = buffer.tobytes()
-            yield (
-                b"--frame\r\n"
-                b"Content-Type: image/jpeg\r\n\r\n" + frame_bytes + b"\r\n"
-            )
+    def frames(self) -> Generator[bytes, None, None]:
+        while not self.stopped:
+            if self.frame is not None:
+                with self.lock:
+                    # Używamy jakości JPEG podanej w main.py
+                    ok, buffer = cv2.imencode('.jpg', self.frame, [cv2.IMWRITE_JPEG_QUALITY, self.jpeg_quality])
+                if ok:
+                    yield (b'--frame\r\nContent-Type: image/jpeg\r\n\r\n' + buffer.tobytes() + b'\r\n')
+            time.sleep(0.05)
 
     def release(self) -> None:
-        self.camera.release()
+        self.stopped = True
+        self.picam2.stop()
