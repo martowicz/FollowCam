@@ -1,7 +1,7 @@
 import cv2
 import time
 from vision import FaceDetector
-from pi_client import send_move_command
+import pi_client
 
 # PAMIĘTAJ: Podmień na prawdziwe IP Twojej Malinki!
 STREAM_URL = "http://192.168.0.43:8080/stream"
@@ -21,6 +21,7 @@ def main():
     # Używamy nazwy bez polskich znaków, żeby Linux się nie pogubił
     window_name = "Mozg FollowCam"
     cv2.namedWindow(window_name, cv2.WINDOW_NORMAL)
+    pi_client.connect_to_pi("192.168.0.43") # IP Malinki
     
     while True:
         ret, frame = cap.read()
@@ -43,7 +44,7 @@ def main():
             
             # Wysyłamy komendę do Malinki (na razie będzie to tylko log w terminalu Pi Zero)
             if abs(pan_adj) > 1 or abs(tilt_adj) > 1:
-                send_move_command(pan_adj, tilt_adj)
+                pi_client.send_move_command(pan_adj, tilt_adj)
 
         # Wyświetlamy płynny obraz w tym JEDNYM, konkretnym oknie
         cv2.imshow(window_name, processed_frame)

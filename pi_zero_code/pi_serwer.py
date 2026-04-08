@@ -1,20 +1,26 @@
-from flask import Flask, request, jsonify
-import time
-
-app = Flask(__name__)
+import socketio
+import eventlet
 
 
-@app.route('/api/move', methods=['POST'])
-def move():
-    data = request.json
-    pan_adj = data.get('pan', 0)
-    tilt_adj = data.get('tilt', 0)
+sio = socketio.Server(cors_allowed_origins='*')
+app = socketio.WSGIApp(sio)
+
+@sio.event
+def connect(sid, environ):
+    print(f"Połączono z mózgiem! ID sesji: {sid}")
+
+@sio.on('move')
+def handle_move(sid, data):
+    pan = data.get('pan', 0)
+    tilt = data.get('tilt', 0)
     
+    print(f"[RUCH WS] Pan: {pan}°, Tilt: {tilt}°")
     
-    print(f"[RUCH] Obracam kamerę: Pan(X): {pan_adj}°, Tilt(Y): {tilt_adj}°")
-    
-    return jsonify({"status": "success", "pan": pan_adj, "tilt": tilt_adj})
+
+@sio.event
+def disconnect(sid):
+    print(f"Rozłączono: {sid}")
 
 if __name__ == '__main__':
-    print("Serwer silników nasłuchuje na porcie 5001...")
-    app.run(host='0.0.0.0', port=5001)
+    print("Serwer WebSocket startuje na porcie 5000...")
+    eventlet.wsgi.server(eventlet.listen(('0.0.0.0', 5000)), app)
