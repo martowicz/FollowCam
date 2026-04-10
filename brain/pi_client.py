@@ -10,12 +10,10 @@ def connect_to_pi(ip):
     except Exception as e:
         print(f"Błąd połączenia: {e}")
 
-def send_move_command(pan, tilt):
+def send_move_command(pan_speed, tilt_angle):
+    # Malinka oczekuje kluczy 'pan_speed' i 'tilt_angle'
     if sio.connected:
-        # Emitujemy zdarzenie zamiast robić POST
-        sio.emit('move', {'pan': pan, 'tilt': tilt})
-    else:
-        print("Brak połączenia! Nie można wysłać ruchu.")
+        sio.emit('move', {'pan_speed': pan_speed, 'tilt_angle': tilt_angle})
 
 # Funkcja do czystego rozłączenia przy wyjściu z programu
 def disconnect_pi():

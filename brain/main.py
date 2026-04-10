@@ -11,14 +11,18 @@ def main():
     cap = cv2.VideoCapture(STREAM_URL)
     detector = FaceDetector()
     
-    # Środek ekranu dla rozdzielczości 640x480
+    # Rozdzielczość strumienia
     TARGET_X = 320 
     TARGET_Y = 240
     
-    # ==========================================
-    # FIX NA LINUXA: TWORZYMY OKNO TYLKO RAZ
-    # ==========================================
-    # Używamy nazwy bez polskich znaków, żeby Linux się nie pogubił
+    # MARTWA STREFA (Deadzone) - margines błędu w pikselach. 
+    # Jeśli twarz jest w tym promieniu od środka, kamera się nie rusza.
+    DEADZONE_X = 40
+    DEADZONE_Y = 30
+    
+    # Pamięć dla serwa TILT (180 stopni). Startujemy od środka.
+    current_tilt = 90
+    
     window_name = "Mozg FollowCam"
     cv2.namedWindow(window_name, cv2.WINDOW_NORMAL)
     pi_client.connect_to_pi("192.168.0.43") # IP Malinki
@@ -30,32 +34,52 @@ def main():
             time.sleep(0.5)
             continue
             
-        # Szukamy twarzy za pomocą kaskad Haara (z pliku vision.py)
         cx, cy, processed_frame = detector.find_face_center(frame)
         
         if cx is not None and cy is not None:
-            # Obliczamy błąd (odległość twarzy od środka)
-            error_x = TARGET_X - cx
-            error_y = TARGET_Y - cy
+            # Obliczamy błąd - konwencja:
+            # error_x > 0 oznacza twarz po prawej stronie
+            # error_y > 0 oznacza twarz w dolnej części ekranu
+            error_x = cx - TARGET_X
+            error_y = cy - TARGET_Y
             
-            # Wyliczamy korektę dla silników
-            pan_adj = round(error_x * 0.05)
-            tilt_adj = round(error_y * 0.05)
+            # --- 1. OŚ TILT (KĄTY DLA SERWA 180) ---
+            if abs(error_y) > DEADZONE_Y:
+                # Jeśli twarz ucieka, powoli dodajemy lub odejmujemy stopnie
+                tilt_step = round(error_y * 0.03) # 0.03 to "czułość"
+                current_tilt += tilt_step
+                # Zabezpieczenie przed przekręceniem poniżej 0 i powyżej 180
+                current_tilt = max(0, min(180, current_tilt))
+                
+            # --- 2. OŚ PAN (PRĘDKOŚĆ DLA SERWA 360) ---
+            pan_speed = 0
+            if abs(error_x) > DEADZONE_X:
+                # Prędkość proporcjonalna do błędu (im dalej twarz, tym szybciej goni)
+                pan_speed = round(error_x * 0.15) # 0.15 to "czułość pedału gazu"
+                # Zabezpieczenie prędkości maksymalnej do zakresu -100 ... 100
+                pan_speed = max(-100, min(100, pan_speed))
             
-            # Wysyłamy komendę do Malinki (na razie będzie to tylko log w terminalu Pi Zero)
-            if abs(pan_adj) > 1 or abs(tilt_adj) > 1:
-                pi_client.send_move_command(pan_adj, tilt_adj)
+            # Wysyłamy aktualne wartości do Malinki
+            pi_client.send_move_command(pan_speed, current_tilt)
+            
+        else:
+            # CRITICAL: Twarz zniknęła! 
+            # Musimy krzyczeć "STOP" dla serwa 360, inaczej będzie się kręcić w nieskończoność
+            pi_client.send_move_command(0, current_tilt)
 
-        # Wyświetlamy płynny obraz w tym JEDNYM, konkretnym oknie
+        # Rysowanie na ekranie (dla debugowania)
+        cv2.putText(processed_frame, f"TILT (Kat): {current_tilt}st", (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
+        if cx is not None:
+            cv2.putText(processed_frame, f"PAN (Predkosc): {pan_speed}", (10, 60), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
+            
         cv2.imshow(window_name, processed_frame)
         
-        # To jest krytyczne dla Linuxa - pozwala mu odświeżyć grafikę w oknie!
-        # Wyjście pod klawiszem 'q'
         if cv2.waitKey(1) & 0xFF == ord('q'):
             print("Zamykanie programu...")
+            # Zatrzymanie ruchu przed wyjściem
+            pi_client.send_move_command(0, 90)
             break
             
-    # Eleganckie sprzątanie po zamknięciu
     cap.release()
     cv2.destroyAllWindows()
 
