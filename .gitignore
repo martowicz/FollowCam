@@ -1,5 +1,3 @@
-# Ignoruj ustawienia połączenia z Malinką
-.vscode/sftp.json
 
 # Ignoruj zdjęcia i wideo z testów kamery
 *.jpg
@@ -12,4 +10,3 @@
 __pycache__/
 .venv/
 venv/
-.vscode/
