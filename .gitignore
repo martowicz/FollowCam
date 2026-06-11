@@ -6,6 +6,8 @@
 *.h264
 *.mp4
 
+*.DS_Store
+
 # Ignoruj pliki tymczasowe i wirtualne środowiska Pythona (przydadzą się później)
 __pycache__/
 .venv/

@@ -46,22 +46,3 @@ def cleanup():
     pi.set_servo_pulsewidth(PAN_PIN, 0)
     pi.set_servo_pulsewidth(TILT_PIN, 0)
     pi.stop()
-
-def center_camera():
-    print("\n[INIT] Procedura bezpiecznego startu...")
-    
-    pi.set_mode(PAN_PIN, pigpio.OUTPUT)
-    pi.set_mode(TILT_PIN, pigpio.OUTPUT)
-    
-    
-    set_pan_speed(0)
-    set_tilt_angle(TILT_CENTER)
-    print("[INIT] Kamera ustabilizowana.\n")
-
-
-if __name__ == "hardware":
-    center_camera()
-
-
-
-
