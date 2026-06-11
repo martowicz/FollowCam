@@ -4,7 +4,8 @@ from vision import FaceDetector
 import pi_client
 
 # PAMIĘTAJ: Podmień na prawdziwe IP Twojej Malinki!
-STREAM_URL = "http://192.168.0.43:8080/stream"
+pi_ip_address = "192.168.2.43"
+STREAM_URL = "http://" + pi_ip_address + ":8080/stream"
 
 def main():
     print("Łączenie z kamerą Raspberry Pi...")
@@ -25,7 +26,7 @@ def main():
     
     window_name = "Mozg FollowCam"
     cv2.namedWindow(window_name, cv2.WINDOW_NORMAL)
-    pi_client.connect_to_pi("192.168.0.43") # IP Malinki
+    pi_client.connect_to_pi(pi_ip_address)
     
     while True:
         ret, frame = cap.read()

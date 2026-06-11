@@ -1,44 +1,15 @@
 import socketio
-import eventlet
-import pigpio
-import sys
+import hardware
+from werkzeug.serving import run_simple
 
-PAN_PIN = 18
-TILT_PIN = 12
-
-PAN_STOP = 1500
-
-pi= pigpio.pi()
-
-if not pi.connected:
-    print("BŁĄD: Nie można połączyć się z demonem pigpiod!")
-    print("Upewnij się, że wpisałeś: sudo systemctl start pigpiod")
-    sys.exit()
-
-
-def set_pan_speed(speed):
-    if speed == 0: pi.set_servo_pulsewidth(PAN_PIN, PAN_STOP)
-
-    else:
-        speed = max(-100, min(100, speed))
-        pulsewidth = PAN_STOP + (speed*5)
-        pi.set_servo_pulsewidth(PAN_PIN, pulsewidth)
-
-def set_tilt_angle(angle):
-    angle = max(0, min(180, angle))
-    pulsewidth = 500 + (angle * 2000 / 180)
-    pi.set_servo_pulsewidth(TILT_PIN, pulsewidth)
-
-
-
-
-
-sio = socketio.Server(cors_allowed_origins='*')
+# async_mode='threading' to klucz! 
+# Pozwala bibliotece sprzętowej robić swoje, nie blokując sieci.
+sio = socketio.Server(cors_allowed_origins='*', async_mode='threading')
 app = socketio.WSGIApp(sio)
 
 @sio.event
 def connect(sid, environ):
-    print(f"Połączono z mózgiem! ID sesji: {sid}")
+    print(f"✅ Połączono z mózgiem! ID sesji: {sid}")
 
 @sio.on('move')
 def handle_move(sid, data):
@@ -46,29 +17,33 @@ def handle_move(sid, data):
         pan_speed = data.get('pan_speed', 0)
         tilt_angle = data.get('tilt_angle', 90)
         
-        set_pan_speed(pan_speed)
-        set_tilt_angle(tilt_angle)
+        hardware.set_pan_speed(pan_speed)
+        hardware.set_tilt_angle(tilt_angle)
         
     except Exception as e:
-        print(f"Błąd sterowania: {e}")
-    
+        print(f"⚠️ Błąd sterowania (move): {e}")
 
 @sio.event
 def disconnect(sid):
-    print(f"Rozłączono: {sid}")
+    print(f"❌ Rozłączono: {sid}. Próbuję zatrzymać silniki...")
+    try:
+        hardware.set_pan_speed(0)
+    except Exception as e:
+        print(f"⚠️ Błąd przy zatrzymywaniu silnika: {e}")
 
 if __name__ == '__main__':
     print("------------------------------------------")
-    print("SERWER FOLLOW-CAM (HARDWARE PWM) GOTOWY")
-    print(f"Nasłuchiwanie na porcie: 5000")
+    print("SERWER FOLLOW-CAM (TRYB STABILNY) GOTOWY")
+    print(f"Nasłuchiwanie na porcie: 5000!!!")
     print("------------------------------------------")
     
     try:
-        eventlet.wsgi.server(eventlet.listen(('0.0.0.0', 5000)), app)
+        # Używamy standardowego serwera, threaded=True zapobiega zawieszaniu
+        run_simple('0.0.0.0', 5000, app, use_reloader=False, threaded=True)
     except KeyboardInterrupt:
         print("\nZamykanie serwera...")
     finally:
-        # Odcięcie zasilania sygnałowego serw przy wyłączeniu skryptu
-        pi.set_servo_pulsewidth(PAN_PIN, 0)
-        pi.set_servo_pulsewidth(TILT_PIN, 0)
-        pi.stop()
+        try:
+            hardware.cleanup()
+        except Exception as e:
+            print(f"Błąd podczas czyszczenia pinów: {e}")

@@ -1,0 +1,73 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>FollowCam Console</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;600;700&family=Spline+Sans+Mono:wght@400;600&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="styles.css" />
+    <script src="https://cdn.socket.io/4.7.5/socket.io.min.js" defer></script>
+    <script
+      src="https://cdn.jsdelivr.net/npm/@mediapipe/face_detection/face_detection.js"
+      defer
+    ></script>
+    <script src="app.js" defer></script>
+  </head>
+  <body>
+    <div class="page">
+      <header class="hero">
+        <p class="eyebrow">FollowCam</p>
+        <h1>Camera stream and motor control</h1>
+        <p class="sub">Live view plus four buttons for pan and tilt.</p>
+      </header>
+
+      <main class="grid">
+        <section class="panel stream-panel">
+          <div class="panel-head">
+            <h2>Live stream</h2>
+            <div class="status-stack">
+              <span id="status" class="status" data-state="off">Disconnected</span>
+              <span id="vision-status" class="status" data-state="off">Vision off</span>
+            </div>
+          </div>
+          <div class="stream-shell">
+            <div class="stream-stage">
+              <img id="stream" alt="Camera stream" />
+              <canvas id="overlay" aria-hidden="true"></canvas>
+            </div>
+            <div class="stream-hint">
+              <span>Stream URL</span>
+              <span id="stream-url" class="mono">-</span>
+            </div>
+          </div>
+        </section>
+
+        <section class="panel control-panel">
+          <div class="panel-head">
+            <h2>Motor control</h2>
+            <button id="toggle-tracking" class="toggle" type="button" aria-pressed="true">
+              Auto tracking: On
+            </button>
+          </div>
+          <div class="telemetry">
+            <div>Pan: <span id="pan-value">0</span></div>
+            <div>Tilt: <span id="tilt-value">180</span></div>
+          </div>
+
+          <div class="control-pad" aria-label="motor controls">
+            <button id="btn-up" type="button">Up</button>
+            <button id="btn-left" type="button">Left</button>
+            <div class="center">Hold Left or Right to pan</div>
+            <button id="btn-right" type="button">Right</button>
+            <button id="btn-down" type="button">Down</button>
+          </div>
+        </section>
+      </main>
+    </div>
+  </body>
+</html>
